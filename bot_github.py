@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MULTI-SIGNAL BROADCASTER – GitHub Actions Edition
-Tanpa sistem banned. Setiap 5 menit scan 50 koin volume tertinggi (≤ $50).
-Kirim sinyal dengan Confidence ≥ 65, TP 0.6%, SL 0.85%.
+SIGNAL BROADCASTER – Render Worker
+Loop nonstop: scan 50 koin volume tertinggi (≤ $50).
+Confidence ≥ 65% | TP 0.6% | SL 0.85%
 """
 
 import time
@@ -14,9 +14,9 @@ from datetime import datetime
 # ================== KONFIGURASI ==================
 TELEGRAM_TOKEN = "7585154530:AAHk9gwv8i2KnAf14kniYtBL9RclZt4Tt0o"
 CHAT_ID = "8041197505"
-TP_PERCENT = 0.6      # 0.6%
-SL_PERCENT = 0.85     # 0.85%
-MIN_CONFIDENCE = 65    # 65%
+TP_PERCENT = 0.6
+SL_PERCENT = 0.85
+MIN_CONFIDENCE = 65
 # =================================================
 
 def send_telegram(msg):
@@ -27,27 +27,29 @@ def send_telegram(msg):
         pass
 
 # -------------------------------------------------------------------
-# Data & Indikator
+# Data & Indikator (sama seperti sebelumnya)
 # -------------------------------------------------------------------
 def fetch_klines(symbol, interval, limit=100):
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    try:
-        resp = requests.get(url, timeout=8)
-        data = resp.json()
-        if isinstance(data, dict) and "code" in data:
-            return None
-        df = pd.DataFrame(data, columns=[
-            "timestamp", "open", "high", "low", "close", "volume",
-            "close_time", "quote_volume", "trades",
-            "taker_buy_base", "taker_buy_quote", "ignore"
-        ])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        for col in ["open", "high", "low", "close", "volume"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-        df.set_index("timestamp", inplace=True)
-        return df[["open", "high", "low", "close", "volume"]]
-    except:
-        return None
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, timeout=8)
+            data = resp.json()
+            if isinstance(data, dict) and "code" in data:
+                return None
+            df = pd.DataFrame(data, columns=[
+                "timestamp", "open", "high", "low", "close", "volume",
+                "close_time", "quote_volume", "trades",
+                "taker_buy_base", "taker_buy_quote", "ignore"
+            ])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+            for col in ["open", "high", "low", "close", "volume"]:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            df.set_index("timestamp", inplace=True)
+            return df[["open", "high", "low", "close", "volume"]]
+        except:
+            time.sleep(10)
+    return None
 
 def add_indicators(df):
     if len(df) < 80:
@@ -175,24 +177,26 @@ def generate_signal(df_h1, df_m15, df_m5):
     }
 
 def get_coins_by_volume(top=50, max_price=50.0):
-    try:
-        resp = requests.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10)
-        tickers = [t for t in resp.json() if t["symbol"].endswith("USDT")]
-        tickers.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
-        res = []
-        for t in tickers:
-            if float(t["lastPrice"]) <= max_price:
-                res.append(t["symbol"])
-            if len(res) >= top:
-                break
-        return res
-    except:
-        return []
+    for attempt in range(3):
+        try:
+            resp = requests.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10)
+            tickers = [t for t in resp.json() if t["symbol"].endswith("USDT")]
+            tickers.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
+            res = []
+            for t in tickers:
+                if float(t["lastPrice"]) <= max_price:
+                    res.append(t["symbol"])
+                if len(res) >= top:
+                    break
+            return res
+        except:
+            time.sleep(10)
+    return []
 
-def main():
+def main_scan():
     coins = get_coins_by_volume(50, 50.0)
     if not coins:
-        send_telegram("❌ Gagal mengambil daftar koin.")
+        send_telegram("❌ Gagal mengambil daftar koin setelah 3 percobaan.")
         return
 
     signals = []
@@ -226,5 +230,14 @@ def main():
             )
             send_telegram(msg)
 
+# ------------------------------------------------------------
 if __name__ == "__main__":
-    main()
+    print("🚀 Bot Broadcasting dimulai (Render Worker)")
+    while True:
+        try:
+            print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Memulai scan...")
+            main_scan()
+        except Exception as e:
+            print(f"Error: {e}")
+            send_telegram(f"⚠️ Bot error: {e}")
+        time.sleep(60)
