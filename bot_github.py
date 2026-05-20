@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-MULTI-SIGNAL BROADCASTER – GitHub Actions Edition (dengan perbaikan ban)
-Mengambil 200 koin teratas, memfilter yang dibanned, lalu memindai 50 koin.
-Ban tetap 20 siklus.
+MULTI-SIGNAL BROADCASTER – GitHub Actions Edition
+Tanpa sistem banned. Setiap 5 menit scan 50 koin volume tertinggi (≤ $50).
+Kirim sinyal dengan Confidence ≥ 65, TP 0.6%, SL 0.85%.
 """
 
 import time
-import json
-import os
 import requests
 import pandas as pd
 import numpy as np
@@ -16,11 +14,9 @@ from datetime import datetime
 # ================== KONFIGURASI ==================
 TELEGRAM_TOKEN = "7585154530:AAHk9gwv8i2KnAf14kniYtBL9RclZt4Tt0o"
 CHAT_ID = "8041197505"
-TP_PERCENT = 0.6
-SL_PERCENT = 0.85
-MIN_CONFIDENCE = 65
-BAN_CYCLES = 20
-BAN_FILE = "ban_state.json"
+TP_PERCENT = 0.6      # 0.6%
+SL_PERCENT = 0.85     # 0.85%
+MIN_CONFIDENCE = 65    # 65%
 # =================================================
 
 def send_telegram(msg):
@@ -29,26 +25,6 @@ def send_telegram(msg):
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=8)
     except:
         pass
-
-def load_banned():
-    if os.path.exists(BAN_FILE):
-        with open(BAN_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_banned(banned):
-    with open(BAN_FILE, "w") as f:
-        json.dump(banned, f)
-
-def update_banned(banned):
-    to_delete = []
-    for sym in banned:
-        banned[sym] -= 1
-        if banned[sym] <= 0:
-            to_delete.append(sym)
-    for sym in to_delete:
-        del banned[sym]
-    return banned
 
 # -------------------------------------------------------------------
 # Data & Indikator
@@ -193,50 +169,30 @@ def generate_signal(df_h1, df_m15, df_m5):
     last = df_m15.iloc[-2]
     price = last["close"]
     return {
-        "symbol": None,
         "signal": "BUY" if bias_bull else "SELL",
         "entry_signal": round(price, 6),
         "confidence": int(score * 100),
     }
 
-# -------------------------------------------------------------------
-# Daftar Koin dengan pengambilan lebih besar
-# -------------------------------------------------------------------
-def get_coins_by_volume(top=50, max_price=50.0, exclude_list=None, fetch_limit=200):
-    """
-    Ambil fetch_limit koin teratas, filter exclude_list, lalu ambil top pertama.
-    """
+def get_coins_by_volume(top=50, max_price=50.0):
     try:
         resp = requests.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10)
         tickers = [t for t in resp.json() if t["symbol"].endswith("USDT")]
         tickers.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
         res = []
-        if exclude_list is None:
-            exclude_list = []
         for t in tickers:
-            sym = t["symbol"]
-            if sym in exclude_list:
-                continue
             if float(t["lastPrice"]) <= max_price:
-                res.append(sym)
+                res.append(t["symbol"])
             if len(res) >= top:
-                break
-            # hentikan juga jika sudah melewati fetch_limit (keamanan)
-            if len(res) + len(exclude_list) >= fetch_limit:
                 break
         return res
     except:
         return []
 
 def main():
-    banned = load_banned()
-    banned = update_banned(banned)
-
-    # Ambil hingga 50 koin yang tidak dibanned dari 200 koin teratas
-    coins = get_coins_by_volume(top=50, max_price=50.0, exclude_list=list(banned.keys()), fetch_limit=200)
+    coins = get_coins_by_volume(50, 50.0)
     if not coins:
-        send_telegram("❌ Semua koin dibanned, coba lagi nanti.")
-        save_banned(banned)
+        send_telegram("❌ Gagal mengambil daftar koin.")
         return
 
     signals = []
@@ -256,22 +212,19 @@ def main():
         time.sleep(0.03)
 
     if not signals:
-        send_telegram("❌ Tidak ada sinyal")
+        send_telegram("❌ Tidak ada sinyal dengan Confidence ≥ 65%")
     else:
+        send_telegram(f"🔔 Ditemukan {len(signals)} sinyal (Conf ≥ 65%):")
         for sig in signals:
             tp_val = round(sig["entry_signal"] * (1 + TP_PERCENT/100), 6) if sig["signal"]=="BUY" else round(sig["entry_signal"] * (1 - TP_PERCENT/100), 6)
             sl_val = round(sig["entry_signal"] * (1 - SL_PERCENT/100), 6) if sig["signal"]=="BUY" else round(sig["entry_signal"] * (1 + SL_PERCENT/100), 6)
             msg = (
                 f"<b>📊 {sig['signal']} {sig['symbol']}</b>\n"
                 f"Entry: {sig['entry_signal']}\n"
-                f"TP: {tp_val} | SL: {sl_val}\n"
+                f"TP: {tp_val} (+{TP_PERCENT}%) | SL: {sl_val} (∓{SL_PERCENT}%)\n"
                 f"Confidence: {sig['confidence']}%"
             )
             send_telegram(msg)
-            banned[sig["symbol"]] = BAN_CYCLES
-        send_telegram(f"📛 {len(signals)} koin baru dibanned.")
-
-    save_banned(banned)
 
 if __name__ == "__main__":
     main()
