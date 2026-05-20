@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-SIGNAL BROADCASTER – Render Worker
-Loop nonstop: scan 50 koin volume tertinggi (≤ $50).
-Confidence ≥ 65% | TP 0.6% | SL 0.85%
+SIGNAL BROADCASTER – Render Web Service
+Loop nonstop + Flask untuk health-check.
 """
 
 import time
+import threading
 import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from flask import Flask
 
 # ================== KONFIGURASI ==================
 TELEGRAM_TOKEN = "7585154530:AAHk9gwv8i2KnAf14kniYtBL9RclZt4Tt0o"
@@ -19,6 +20,12 @@ SL_PERCENT = 0.85
 MIN_CONFIDENCE = 65
 # =================================================
 
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive", 200
+
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -27,7 +34,7 @@ def send_telegram(msg):
         pass
 
 # -------------------------------------------------------------------
-# Data & Indikator (sama seperti sebelumnya)
+# Data & Indikator (sama persis seperti sebelumnya, tidak diubah)
 # -------------------------------------------------------------------
 def fetch_klines(symbol, interval, limit=100):
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
@@ -230,9 +237,7 @@ def main_scan():
             )
             send_telegram(msg)
 
-# ------------------------------------------------------------
-if __name__ == "__main__":
-    print("🚀 Bot Broadcasting dimulai (Render Worker)")
+def run_loop():
     while True:
         try:
             print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Memulai scan...")
@@ -241,3 +246,11 @@ if __name__ == "__main__":
             print(f"Error: {e}")
             send_telegram(f"⚠️ Bot error: {e}")
         time.sleep(60)
+
+if __name__ == "__main__":
+    # Jalankan loop di thread terpisah
+    t = threading.Thread(target=run_loop, daemon=True)
+    t.start()
+    # Jalankan Flask
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
