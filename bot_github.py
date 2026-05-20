@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MULTI-SIGNAL BROADCASTER – GitHub Actions Edition
-Satu siklus: scan 50 koin → kirim sinyal Telegram → update ban → selesai.
-State ban disimpan di ban_state.json agar persisten antar run.
+MULTI-SIGNAL BROADCASTER – GitHub Actions Edition (dengan perbaikan ban)
+Mengambil 200 koin teratas, memfilter yang dibanned, lalu memindai 50 koin.
+Ban tetap 20 siklus.
 """
 
 import time
@@ -51,7 +51,7 @@ def update_banned(banned):
     return banned
 
 # -------------------------------------------------------------------
-# Data & Indikator (sama persis seperti sebelumnya)
+# Data & Indikator
 # -------------------------------------------------------------------
 def fetch_klines(symbol, interval, limit=100):
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
@@ -199,7 +199,13 @@ def generate_signal(df_h1, df_m15, df_m5):
         "confidence": int(score * 100),
     }
 
-def get_coins_by_volume(top=50, max_price=50.0, exclude_list=None):
+# -------------------------------------------------------------------
+# Daftar Koin dengan pengambilan lebih besar
+# -------------------------------------------------------------------
+def get_coins_by_volume(top=50, max_price=50.0, exclude_list=None, fetch_limit=200):
+    """
+    Ambil fetch_limit koin teratas, filter exclude_list, lalu ambil top pertama.
+    """
     try:
         resp = requests.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10)
         tickers = [t for t in resp.json() if t["symbol"].endswith("USDT")]
@@ -215,6 +221,9 @@ def get_coins_by_volume(top=50, max_price=50.0, exclude_list=None):
                 res.append(sym)
             if len(res) >= top:
                 break
+            # hentikan juga jika sudah melewati fetch_limit (keamanan)
+            if len(res) + len(exclude_list) >= fetch_limit:
+                break
         return res
     except:
         return []
@@ -222,8 +231,9 @@ def get_coins_by_volume(top=50, max_price=50.0, exclude_list=None):
 def main():
     banned = load_banned()
     banned = update_banned(banned)
-    
-    coins = get_coins_by_volume(50, 50.0, exclude_list=list(banned.keys()))
+
+    # Ambil hingga 50 koin yang tidak dibanned dari 200 koin teratas
+    coins = get_coins_by_volume(top=50, max_price=50.0, exclude_list=list(banned.keys()), fetch_limit=200)
     if not coins:
         send_telegram("❌ Semua koin dibanned, coba lagi nanti.")
         save_banned(banned)
