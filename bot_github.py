@@ -16,9 +16,9 @@ from datetime import datetime
 # ================== KONFIGURASI ==================
 TELEGRAM_TOKEN = "7585154530:AAHk9gwv8i2KnAf14kniYtBL9RclZt4Tt0o"
 CHAT_ID = "8041197505"
-TP_PERCENT = 0.5
-SL_PERCENT = 1.0
-MIN_CONFIDENCE = 60
+TP_PERCENT = 0.6
+SL_PERCENT = 0.85
+MIN_CONFIDENCE = 65
 BAN_CYCLES = 20
 BAN_FILE = "ban_state.json"
 # =================================================
